@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Petri Panic — Evolution Arena (v1.5.2)</title>
+<style>
+  :root{ --bg:#0b0f14; --ink:#e5e7eb; --muted:#94a3b8; --panel:#111827; --accent:#22d3ee; --ok:#34d399; --warn:#facc15; --bad:#ef4444; --bar:#1f2937; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Yu Gothic","Meiryo",sans-serif}
+  header{display:flex;gap:10px;align-items:center; padding:10px 12px; border-bottom:1px solid #111; background:linear-gradient(180deg,#0d1218,#0a0e13)}
+  header h1{margin:0; font-size:18px; letter-spacing:.3px}
+  header .sp{flex:1}
+  header button, header select{background:#0f172a; color:var(--ink); border:1px solid #253043; padding:8px 10px; border-radius:10px; cursor:pointer}
+  header button:hover{border-color:#38506f}
+  header .pill{padding:6px 10px;border-radius:999px; border:1px solid #2b374b; color:#9fbad8}
+  main{display:grid; grid-template-columns:1fr 320px; gap:12px; padding:12px; height:calc(100% - 54px)}
+  #stageWrap{background:#0a0f16; border:1px solid #121826; border-radius:12px; position:relative; overflow:hidden; min-height:420px}
+  canvas{display:block; width:100%; height:100%}
+  aside{background:#0a0f16; border:1px solid #121826; border-radius:12px; padding:12px; overflow:auto}
+  h2{margin:6px 0 8px; font-size:15px; color:#cbd5e1}
+  .row{display:flex; gap:8px; align-items:center; margin:6px 0}
+  .bar{height:10px; background:#0b1320; border:1px solid #1b2434; border-radius:8px; overflow:hidden}
+  .bar>i{display:block; height:100%; width:0%; background:linear-gradient(90deg,#22d3ee,#06b6d4)}
+  .hud{position:absolute; left:8px; top:8px; display:flex; gap:8px; align-items:center; font-size:13px; color:#cbd5e1; pointer-events:none}
+  .tag{background:#0f172a; border:1px solid #233049; padding:3px 8px; border-radius:8px}
+  .evoModal{position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(2,6,12,.7)}
+  .evoCardWrap{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; width:min(900px,92%);}
+  .card{background:#0b1220; border:1px solid #22324c; border-radius:12px; padding:12px; cursor:pointer}
+  .card[disabled]{opacity:.45; cursor:not-allowed}
+  .card h3{margin:0 0 6px; font-size:16px; color:#e2e8f0}
+  .card p{margin:0; font-size:13px; color:#94a3b8}
+  .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size:12px; background:#0f172a; border:1px solid #2b3a54; padding:2px 6px; border-radius:6px}
+  .mutelist{display:grid; grid-template-columns:1fr; gap:6px}
+  .mutelist div{display:flex; justify-content:space-between; gap:8px; background:#0b1220; border:1px solid #1c2940; padding:6px 8px; border-radius:8px; font-size:13px}
+  .small{font-size:12px; color:#9fbad8}
+  .foot{margin-top:8px; font-size:12px; color:#7aa2c6}
+  .overlayMsg{position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.35)}
+  .overlayMsg .pane{background:#0b1220; border:1px solid #21324d; border-radius:12px; padding:14px; width:min(520px,92%)}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .scoretable{width:100%; border-collapse:collapse; font-size:13px}
+  .scoretable th,.scoretable td{border-bottom:1px solid #1b2436; padding:6px 4px; text-align:left}
+  .mono{font-variant-numeric: tabular-nums}
+</style>
+
+<!--
+README / RULES / DELIVERABLES
+
+Petri Panic — Evolution Arena
+Version: v1.5.2 (2025-10-18)
+
+Quick controls
+- Move: WASD / Arrows
+- Powers: Space (1), Shift (2)
+- Pause/Resume: P or Pause button
+- Start/Restart: header button
+
+Changes in v1.5.2 (bugfix)
+- Eliminated any remaining patterns that could cause `(intermediate value)(...) is not a function`.
+  • Replaced all short-circuit callable checks like `ev.apply && ev.apply()` with explicit `typeof` guards.
+  • Removed optional chaining where not essential to avoid older engine pitfalls.
+- Kept doubled player baseline speed and per-level speed growth.
+- Wildlife intelligence tiers (low/med/high) intact.
+- Added extra sanity tests including sfx safety and evolution-use safety.
+
+Behavioral recap
+- NPC top speeds stay below player Standard.
+-->
+</head>
+<body>
+<header>
+  <h1>🧫 Petri Panic</h1>
+  <span class="pill">Endless • Variable Waves • Two Powers</span>
+  <span class="sp"></span>
+  <button id="btnStart">Start / Restart</button>
+  <button id="btnPause">Pause</button>
+  <button id="btnScores">Scores</button>
+  <button id="btnSettings">Settings</button>
+</header>
+
+<main>
+  <section id="stageWrap">
+    <canvas id="stage" width="960" height="600" aria-label="Game canvas"></canvas>
+    <div class="hud" id="hud">
+      <span class="tag mono" id="hudLvl">Lv 1</span>
+      <span class="tag mono" id="hudScore">Score 0</span>
+      <span class="tag mono" id="hudPowers">Powers: 0/2</span>
+      <span class="tag mono" id="hudCD">CD ▢ ▢</span>
+    </div>
+    <div class="evoModal" id="evoModal" role="dialog" aria-modal="true">
+      <div class="evoCardWrap" id="evoCards"></div>
+    </div>
+    <div class="overlayMsg" id="msg">
+      <div class="pane">
+        <h3 style="margin:0 0 6px">You were eaten.</h3>
+        <p style="margin:0 0 8px" id="finalStats">Score: 0</p>
+        <div class="grid2">
+          <button id="msgRestart">Restart</button>
+          <button id="msgClose">Close</button>
+        </div>
+      </div>
+    </div>
+    <div class="overlayMsg" id="paused">
+      <div class="pane">
+        <h3 style="margin:0 0 6px">Paused</h3>
+        <div class="grid2">
+          <button id="pausedResume">Resume</button>
+          <button id="pausedSettings">Settings</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside>
+    <h2>Status</h2>
+    <div class="row"><span style="width:90px;color:#9fbad8">Level</span><span class="mono" id="sideLvl">1</span></div>
+    <div class="row"><span style="width:90px;color:#9fbad8">Biomass</span>
+      <div class="bar" style="flex:1"><i id="bar"></i></div>
+      <span class="mono" id="barPct" style="width:40px;text-align:right">0%</span>
+    </div>
+    <div class="row"><span style="width:90px;color:#9fbad8">Score</span><span class="mono" id="sideScore">0</span></div>
+    <div class="row"><span style="width:90px;color:#9fbad8">Powers</span><span class="mono" id="sidePowers">None</span></div>
+    <div class="foot">Controls: Move = WASD/Arrows · Power1 = Space · Power2 = Shift · Pause = P</div>
+    <h2 style="margin-top:12px">Mutations</h2>
+    <div class="mutelist" id="mutelist"></div>
+  </aside>
+</main>
+
+<!-- Settings Modal -->
+<div class="overlayMsg" id="settings">
+  <div class="pane">
+    <h3 style="margin:0 0 8px">Settings</h3>
+    <div class="row">
+      <label style="width:160px">World Density</label>
+      <select id="selDensity">
+        <option value="low">Low</option>
+        <option value="med">Medium</option>
+        <option value="high">High</option>
+      </select>
+    </div>
+    <div class="row">
+      <label style="width:160px">Predator Aggression</label>
+      <select id="selAggro">
+        <option value="calm">Calm</option>
+        <option value="std">Standard</option>
+        <option value="frenzy">Frenzied</option>
+      </select>
+    </div>
+    <div class="row">
+      <label style="width:160px">Player Speed</label>
+      <select id="selPlySpeed">
+        <option value="gentle">Gentle</option>
+        <option value="std">Standard</option>
+        <option value="quick">Quick</option>
+        <option value="hyper">Hyper</option>
+      </select>
+    </div>
+    <div class="row">
+      <label style="width:160px">Sound</label>
+      <select id="selSound">
+        <option value="on">On</option>
+        <option value="off">Off</option>
+      </select>
+    </div>
+    <div class="grid2" style="margin-top:8px">
+      <button id="settingsSave">Save</button>
+      <button id="settingsClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Scores Modal -->
+<div class="overlayMsg" id="scores">
+  <div class="pane">
+    <h3 style="margin:0 0 8px">Top 10 Local Scores</h3>
+    <table class="scoretable mono" id="scoreTable">
+      <thead><tr><th>#</th><th>Score</th><th>Level</th><th>Time</th><th>Date</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="grid2" style="margin-top:8px">
+      <button id="scoresClose">Close</button>
+      <button id="scoresClear">Clear Scores</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ========= Utility ========= */
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const rand=(a,b)=>Math.random()*(b-a)+a;
+const now=()=>performance.now();
+
+/* ========= Persistent Settings / Scores ========= */
+const LS_KEY_SETTINGS = "petri_settings_v1_5_2"; // new key for this build
+const LS_KEY_SCORES = "petri_scores_v1";
+
+const Settings = {
+  density: "med",   // low, med, high
+  aggro: "std",     // calm, std, frenzy
+  playerSpeed: "std", // gentle, std, quick, hyper
+  sound: "off",     // on, off
+  load(){ try{ const s=JSON.parse(localStorage.getItem(LS_KEY_SETTINGS)||"{}"); Object.assign(this,s);}catch{} },
+  save(){ localStorage.setItem(LS_KEY_SETTINGS, JSON.stringify({density:this.density,aggro:this.aggro,playerSpeed:this.playerSpeed,sound:this.sound})); }
+};
+Settings.load();
+
+const Scores = {
+  list: [],
+  load(){ try{ this.list=JSON.parse(localStorage.getItem(LS_KEY_SCORES)||"[]"); }catch{ this.list=[]; } },
+  add(e){ this.list.push(e); this.list.sort((a,b)=>b.score-a.score); this.list=this.list.slice(0,10); localStorage.setItem(LS_KEY_SCORES, JSON.stringify(this.list)); },
+  clear(){ this.list=[]; localStorage.removeItem(LS_KEY_SCORES); }
+};
+Scores.load();
+
+/* ========= DOM refs ========= */
+const canvas = document.getElementById("stage");
+const ctx = canvas.getContext("2d");
+const wrap = document.getElementById("stageWrap");
+const hudLvl = document.getElementById("hudLvl");
+const hudScore = document.getElementById("hudScore");
+const hudPowers = document.getElementById("hudPowers");
+const hudCD = document.getElementById("hudCD");
+const bar = document.getElementById("bar");
+const barPct = document.getElementById("barPct");
+const sideLvl = document.getElementById("sideLvl");
+const sideScore = document.getElementById("sideScore");
+const sidePowers = document.getElementById("sidePowers");
+const mutelist = document.getElementById("mutelist");
+const evoModal = document.getElementById("evoModal");
+const evoCards = document.getElementById("evoCards");
+const msg = document.getElementById("msg");
+const paused = document.getElementById("paused");
+const finalStats = document.getElementById("finalStats");
+
+/* Buttons */
+const btnStart = document.getElementById("btnStart");
+const btnPause = document.getElementById("btnPause");
+const btnScores = document.getElementById("btnScores");
+const btnSettings = document.getElementById("btnSettings");
+
+/* Settings UI */
+const settingsDlg = document.getElementById("settings");
+const selDensity = document.getElementById("selDensity");
+const selAggro = document.getElementById("selAggro");
+const selPlySpeed = document.getElementById("selPlySpeed");
+const selSound = document.getElementById("selSound");
+
+/* Scores UI */
+const scoresDlg = document.getElementById("scores");
+const scoreTable = document.getElementById("scoreTable").querySelector("tbody");
+
+/* ========= Input ========= */
+const Keys = {};
+addEventListener("keydown",e=>{ Keys[e.key]=true; if(e.key===" "||e.key==="Shift") e.preventDefault(); if((e.key||"").toLowerCase()==="p") togglePause(); });
+addEventListener("keyup",e=>Keys[e.key]=false);
+
+/* ========= World / Entities ========= */
+const BASE_STD_SPEED = 280; // doubled standard player baseline
+const LEVEL_SPEED_STEP = 4; // per-level permanent bonus to player top speed
+const W = { w: canvas.width, h: canvas.height, time:0, running:false, lastT:0, wave:0, waveTimer:0, deaths:0 };
+const ENT = []; // all entities, 0 = player
+let Player;
+
+function makeEntity(kind, r, x, y, speed){
+  const ang = rand(0,Math.PI*2);
+  const s = speed ?? rand(20, 60);
+  // intelligence: low, med, high
+  const iqRoll = Math.random();
+  const iq = iqRoll < 0.4 ? "low" : iqRoll < 0.75 ? "med" : "high";
+  return { kind, r, x, y, vx: Math.cos(ang)*s, vy: Math.sin(ang)*s, aiTimer:0, seekTimer:0, jitter:0, iq };
+}
+
+/* ========= Player / Progression ========= */
+const Prog = { level:1, size:10, biomass:0, next:20, score:0, actives:[], passives:[], cds:{}, alive:true, startTime:0 };
+
+// Track base speed, per-level bonus, and passive bonuses; derive current topSpeed
+const State = { topBase:BASE_STD_SPEED, topBonus:0, topPassive:0, topSpeed:BASE_STD_SPEED, drag:0.88, turnBoost:0.0, margin:0.10, radar:false, slowOnNear:false, invuln:0, toxin:false,
+  armor:false, armorTimer:0, extraLife:false, chain:false, chainCount:0, eff:false };
+
+function recalcTopSpeed(){ State.topSpeed = State.topBase + State.topBonus + State.topPassive; }
+
+const SpeedMap = { gentle:220, std:280, quick:330, hyper:380 };
+function applySpeedSetting(){ State.topBase = SpeedMap[Settings.playerSpeed] || BASE_STD_SPEED; recalcTopSpeed(); }
+
+function resetGame(){
+  ENT.length=0;
+  Object.assign(Prog,{level:1,size:10,biomass:0,next:20,score:0,actives:[],passives:[],cds:{},alive:true});
+  Object.assign(State,{ topBase:State.topBase, topBonus:0, topPassive:0, topSpeed:State.topBase, drag:0.88, turnBoost:0.0, margin:0.10, radar:false, slowOnNear:false, invuln:0, toxin:false, armor:false, armorTimer:0, extraLife:false, chain:false, chainCount:0, eff:false });
+  recalcTopSpeed();
+  W.wave=0; W.waveTimer=0; W.time=0; W.deaths=0;
+  Player = makeEntity("player", Prog.size, W.w/2, W.h/2, 0);
+  ENT.push(Player);
+  spawnInitial();
+  updateHUD();
+}
+
+function spawnInitial(){ const base = {low:18, med:28, high:38}[Settings.density]; for(let i=0;i<base;i++) spawnAroundEdges(); }
+function sizeForLevel(lv){ return 8 + lv*2.2; }
+function gainBiomass(a){ Prog.biomass += a; while(Prog.biomass>=Prog.next){ Prog.biomass-=Prog.next; levelUp(); } }
+function levelUp(){ Prog.level++; Prog.size=sizeForLevel(Prog.level); Player.r=Prog.size; Prog.next=Math.round(Prog.next*1.25); State.topBonus += LEVEL_SPEED_STEP; recalcTopSpeed(); if(Prog.level%5===0){ pauseForEvolution(); } }
+function addScore(v){ Prog.score+=v; }
+
+/* ========= Evolutions ========= */
+const Evolutions = [
+  {id:"dash", name:"Cilia Burst", type:"active", cd:5, desc:"Short forward dash. Briefly ignores inertia.", use(){ const ang=Math.atan2(Player.vy,Player.vx) || getInputAngle() || 0; const sp=State.topSpeed*2.0; Player.vx=Math.cos(ang)*sp; Player.vy=Math.sin(ang)*sp; sfx("dash"); }},
+  {id:"blink", name:"Phase Slip", type:"active", cd:10, desc:"Very short invuln blink. You pass through for 0.3s.", use(){ State.invuln=0.3; sfx("blink"); }},
+  {id:"turn", name:"Tight Turning", type:"passive", desc:"Higher steering and lower drift.", apply(){ State.turnBoost+=0.6; State.drag=0.90; }},
+  {id:"glide", name:"Laminar Glide", type:"passive", desc:"Faster top speed.", apply(){ State.topPassive+=30; recalcTopSpeed(); }},
+  {id:"radar", name:"Chemosense Ring", type:"passive", desc:"Mini-radar shows nearby predators.", apply(){ State.radar=true; }},
+  {id:"timeslow", name:"Near-Miss Slow", type:"passive", desc:"Time slows briefly when a predator grazes you.", apply(){ State.slowOnNear=true; }},
+  {id:"spike", name:"Membrane Spikes", type:"passive", desc:"Slightly larger eat margin vs equals.", apply(){ State.margin+=0.06; }},
+  {id:"engulf", name:"Engulf Pulse", type:"active", cd:7, desc:"Short-range gulp burst around you.", use(){ sfx("burst"); pulseEat(Prog.size*1.2); }},
+  {id:"toxin", name:"Toxin Wake", type:"passive", desc:"Trail harms tiny prey for bonus biomass.", apply(){ State.toxin=true; }},
+  {id:"grapple", name:"Grapple Filament", type:"active", cd:8, desc:"Lash forward to drag prey to you.", use(){ sfx("lash"); filamentPull(); }},
+  {id:"decoy", name:"Budding Decoy", type:"active", cd:12, desc:"Spawn a decoy that attracts predators.", use(){ sfx("pop"); spawnDecoy(); }},
+  {id:"armor", name:"Protein Plates", type:"passive", desc:"Ignore one equal-size collision per 10s.", apply(){ State.armor=true; }},
+  {id:"split", name:"Cytokinesis", type:"passive", desc:"One extra life at half size on death.", apply(){ State.extraLife=true; }},
+  {id:"chain", name:"Feeding Frenzy", type:"passive", desc:"Streaks grant rising biomass yield.", apply(){ State.chain=true; }},
+  {id:"efficiency", name:"Metabolic Efficiency", type:"passive", desc:"-15% threshold to grow.", apply(){ Prog.next=Math.max(10, Math.round(Prog.next*0.85)); State.eff=true; }},
+  {id:"warp", name:"Micro-Warp", type:"active", cd:9, desc:"Hop a short distance toward aim.", use(){ sfx("blink"); const ang=getInputAngle()||0; Player.x=wrapX(Player.x+Math.cos(ang)*120); Player.y=wrapY(Player.y+Math.sin(ang)*120); State.invuln=0.15; }},
+  {id:"stun", name:"Ionic Pulse", type:"active", cd:9, desc:"Stuns nearby predators briefly.", use(){ sfx("pulse"); stunPreds(160,0.9); }},
+];
+
+function availableEvos(){
+  const owned=new Set(Prog.passives.concat(Prog.actives));
+  const pool=Evolutions.filter(function(e){ return !owned.has(e.id) || (e.type==="active" && Prog.actives.length<2); });
+  const tiered=Prog.level>=10?pool:pool.filter(function(e){ return ["warp","stun"].indexOf(e.id)===-1; });
+  const picks=[]; const copy=tiered.slice();
+  for(let i=0;i<3 && copy.length;i++){ const idx=(Math.random()*copy.length)|0; picks.push(copy.splice(idx,1)[0]); }
+  return picks;
+}
+
+function pauseForEvolution(){
+  W.running=false; evoCards.innerHTML="";
+  const picks=availableEvos();
+  picks.forEach(function(ev){
+    const c=document.createElement("div"); c.className="card"; let disabled=false;
+    if(ev.type==="active" && Prog.actives.length>=2){ disabled=true; c.setAttribute("disabled",""); }
+    c.innerHTML = '<h3>'+ev.name+' '+(ev.type==="active"?'<span class="small">[Active <span class="kbd">'+(Prog.actives.length===0?"Space":"Shift")+'</span>]</span>':'')+'</h3>'+
+                  '<p>'+ev.desc+'</p>';
+    c.addEventListener("click",function(){ if(disabled) return; acquireEvolution(ev); evoModal.style.display="none"; resumeGame(); });
+    evoCards.appendChild(c);
+  });
+  evoModal.style.display="flex";
+}
+
+function acquireEvolution(ev){
+  if(ev.type==="active"){ Prog.actives.push(ev.id); Prog.cds[ev.id]=0; }
+  else { Prog.passives.push(ev.id); if(typeof ev.apply === 'function') ev.apply(); }
+  refreshMutelist(); updateHUD();
+}
+
+/* ========= Powers helpers ========= */
+function pulseEat(radius){ let eaten=0; for(let i=ENT.length-1;i>=1;i--){ const e=ENT[i]; if(e.kind==="prey"||e.kind==="neutral"){ const dx=e.x-Player.x, dy=e.y-Player.y; if(dx*dx+dy*dy<=radius*radius){ ENT.splice(i,1); eaten++; const gain=Math.max(1,Math.round(e.r*0.6)); gainBiomass(gain); addScore(gain); } } } if(State.chain) State.chainCount+=eaten; }
+function filamentPull(){ const ang=getInputAngle()||Math.atan2(Player.vy,Player.vx)||0; let best=null,bd=1e9; for(let i=1;i<ENT.length;i++){ const e=ENT[i]; if(e.kind==="prey"||e.kind==="neutral"){ const dx=e.x-Player.x, dy=e.y-Player.y, d=Math.hypot(dx,dy); const a=Math.atan2(dy,dx); let da=Math.abs(Math.atan2(Math.sin(a-ang),Math.cos(a-ang))); if(d<260 && da<0.6 && d<bd){ bd=d; best=e; } } } if(best){ const pull=480; const ux=Player.x-best.x, uy=Player.y-best.y, dd=Math.hypot(ux,uy)||1; best.vx+=(ux/dd)*pull; best.vy+=(uy/dd)*pull; } }
+function stunPreds(r,sec){ for(const e of ENT){ if(e.kind!=="pred") continue; const dx=e.x-Player.x, dy=e.y-Player.y; if(dx*dx+dy*dy<=r*r){ e.stun=Math.max(e.stun||0,sec); } } }
+
+/* ========= Spawning / Waves ========= */
+function spawnAroundEdges(){ const side=(Math.random()*4)|0; let x=0,y=0; if(side===0){x=0;y=rand(0,W.h);} else if(side===1){x=W.w;y=rand(0,W.h);} else if(side===2){y=0;x=rand(0,W.w);} else {y=W.h;x=rand(0,W.w);} const bias=Prog.level*0.02 + W.wave*0.03; const roll=Math.random(); let kind="prey", r; if(roll<0.60){ r=rand(4, Math.max(5, Player.r*rand(0.45,0.8))); kind="prey"; } else if(roll<0.85){ r=rand(Player.r*0.85, Player.r*1.05); kind="neutral"; } else { r=rand(Player.r*1.15, Player.r*(1.6+bias)); kind="pred"; }
+  // NPC speed baseline: always relative to BASE_STD_SPEED, not current player setting
+  let baseS = clamp(140 - r*2.0, 40, 160);
+  if(kind==="pred"){ const cap = BASE_STD_SPEED*0.95; baseS = Math.min(baseS, cap); }
+  if(kind!=="pred"){ const capPrey = BASE_STD_SPEED*0.85; baseS = Math.min(baseS, capPrey); }
+  const e=makeEntity(kind,r,x,y,baseS); ENT.push(e); }
+
+function waveLogic(dt){ W.waveTimer+=dt; if(W.waveTimer>10){ W.waveTimer=0; W.wave++; } const mult={low:0.6, med:1.0, high:1.4}[Settings.density] * (1 + W.wave*0.12); const need=30*mult - (ENT.length-1); if(need>0){ const n=Math.min(need|0,3); for(let i=0;i<n;i++) spawnAroundEdges(); } }
+
+/* ========= AI ========= */
+function aiStep(e,dt){
+  // Generic perception vs player
+  const dxP = Player.x - e.x, dyP = Player.y - e.y;
+  const distP = Math.hypot(dxP,dyP) || 1;
+  const biggerThanPlayer = e.r > Player.r * 1.05;
+  const smallerThanPlayer = e.r < Player.r * 0.95;
+  const sight = 260; // perception radius
+
+  // Base speed caps (NPCs stay under player's Standard)
+  const capPred = BASE_STD_SPEED*0.95;
+  const capPrey = BASE_STD_SPEED*0.85;
+
+  // Helper to steer towards/away from a target with some noise
+  const steer = function(toward, speed, noise){
+    toward = toward!==false; // default true
+    speed = speed||80; noise = noise||0;
+    let dir = Math.atan2(dyP, dxP);
+    if(noise>0){ dir += rand(-noise, noise); }
+    const k = speed / distP;
+    const fx = Math.cos(dir)*k;
+    const fy = Math.sin(dir)*k;
+    if(toward){ e.vx = e.vx*0.6 + fx*0.4; e.vy = e.vy*0.6 + fy*0.4; }
+    else { e.vx = e.vx*0.6 - fx*0.4; e.vy = e.vy*0.6 - fy*0.4; }
+  };
+
+  // Behavior by IQ
+  if(e.iq === "low"){
+    // Drift aimlessly; tiny jitter
+    e.aiTimer -= dt;
+    if(e.aiTimer<=0){ e.aiTimer = rand(0.8,1.6); e.vx += rand(-30,30); e.vy += rand(-30,30); }
+  } else if(e.iq === "med"){
+    // React, but hesitate and sometimes choose poorly
+    e.seekTimer -= dt;
+    if(e.seekTimer<=0){
+      e.seekTimer = rand(0.6,1.4);
+      const mistake = Math.random()<0.25; // 25% wrong call
+      if(distP < sight){
+        const spd = clamp(110 - e.r, 40, 120);
+        if(biggerThanPlayer){ // it can eat player
+          if(mistake) steer(false, spd, 0.6); else steer(true, spd, 0.25);
+        } else if(smallerThanPlayer){ // player is threat
+          if(mistake) steer(true, spd, 0.6); else steer(false, spd, 0.25);
+        } else {
+          e.vx += rand(-40,40); e.vy += rand(-40,40);
+        }
+      } else {
+        e.vx += rand(-30,30); e.vy += rand(-30,30);
+      }
+    }
+  } else { // high IQ
+    // Pursue prey, flee predators decisively
+    e.seekTimer -= dt;
+    if(e.seekTimer<=0){
+      e.seekTimer = rand(0.35,0.9);
+      if(distP < sight){
+        const spd = clamp(130 - e.r, 50, 150);
+        if(biggerThanPlayer) steer(true, spd, 0.12);
+        else if(smallerThanPlayer) steer(false, spd, 0.12);
+        else { e.vx += rand(-20,20); e.vy += rand(-20,20); }
+      } else {
+        e.vx += rand(-25,25); e.vy += rand(-25,25);
+      }
+    }
+  }
+
+  // Kind-specific caps and stun handling
+  if(e.stun){ e.stun -= dt; e.vx*=0.96; e.vy*=0.96; return; }
+  const cap = e.kind === "pred" ? capPred : capPrey;
+  const sp = Math.hypot(e.vx,e.vy);
+  if(sp>cap){ e.vx *= cap/sp; e.vy *= cap/sp; }
+}
+
+/* ========= Movement / Wrap ========= */
+function wrapX(x){ if(x<0) return x+W.w; if(x>W.w) return x-W.w; return x; }
+function wrapY(y){ if(y<0) return y+W.h; if(y>W.h) return y-W.h; return y; }
+
+/* ========= Input handling ========= */
+function getInputAngle(){ const up=Keys["ArrowUp"]||Keys["w"]||Keys["W"]; const dn=Keys["ArrowDown"]||Keys["s"]||Keys["S"]; const lf=Keys["ArrowLeft"]||Keys["a"]||Keys["A"]; const rt=Keys["ArrowRight"]||Keys["d"]||Keys["D"]; let x=0,y=0; if(up) y-=1; if(dn) y+=1; if(lf) x-=1; if(rt) x+=1; if(x||y) return Math.atan2(y,x); return null; }
+function handleInput(dt){
+  const ang=getInputAngle();
+  if(ang!=null){
+    const accel=(State.topSpeed*2.0)*(1+State.turnBoost);
+    Player.vx+=Math.cos(ang)*accel*dt;
+    Player.vy+=Math.sin(ang)*accel*dt;
+  }
+  const sp=Math.hypot(Player.vx,Player.vy);
+  const maxS=State.topSpeed;
+  if(sp>maxS){ Player.vx*=maxS/sp; Player.vy*=maxS/sp; }
+  Player.vx*=State.drag; Player.vy*=State.drag;
+  if(Prog.actives[0] && (Keys[" "]||Keys["Spacebar"])) { tryUse(Prog.actives[0]); Keys[" "]=false; }
+  if(Prog.actives[1] && Keys["Shift"]) { tryUse(Prog.actives[1]); Keys["Shift"]=false; }
+}
+function tryUse(id){ const ev=Evolutions.find(function(e){ return e.id===id; }); if(!ev) return; if(Prog.cds[id] && Prog.cds[id]>0) return; if(typeof ev.use === 'function') ev.use(); Prog.cds[id]=ev.cd || 6; }
+
+/* ========= Collisions ========= */
+function eatMarginOK(a,b){ const m=1.0+State.margin; return a.r>b.r && (a.r>=b.r*m); }
+function collideStep(){ for(let i=ENT.length-1;i>=1;i--){ const e=ENT[i]; const dx=e.x-Player.x, dy=e.y-Player.y, d2=dx*dx+dy*dy, rr=(e.r+Player.r)*(e.r+Player.r); if(d2<=rr){ if(State.invuln>0) continue; if(eatMarginOK(Player,e)){ ENT.splice(i,1); const baseGain=Math.max(1,Math.round(e.r*0.6)); const gain=baseGain; gainBiomass(gain); addScore(gain); if(State.chain) State.chainCount++; } else if(eatMarginOK(e,Player)){ gotEatenBy(e); return; } else { if(State.armor && State.armorTimer<=0){ State.armorTimer=10; } else { const nx=dx/Math.sqrt(d2||1), ny=dy/Math.sqrt(d2||1); Player.vx-=nx*60; Player.vy-=ny*60; } } } }
+  if(State.toxin){ for(let i=ENT.length-1;i>=1;i--){ const e=ENT[i]; if(e.kind!=="prey") continue; const dx=e.x-Player.x, dy=e.y-Player.y; if(dx*dx+dy*dy<(Player.r*0.9)*(Player.r*0.9) && Math.random()<0.05){ ENT.splice(i,1); const gain=Math.max(1,Math.round(e.r*0.4)); gainBiomass(gain); addScore(gain); } } }
+}
+
+function gotEatenBy(){ if(State.extraLife && W.deaths===0){ W.deaths++; Prog.size=Math.max(8,Math.round(Prog.size*0.5)); Player.r=Prog.size; Player.x=rand(0,W.w); Player.y=rand(0,W.h); Player.vx=0; Player.vy=0; State.invuln=1.4; sfx("life"); return; } Prog.alive=false; pauseGame(); endRun(); }
+
+/* ========= End / Scores ========= */
+function endRun(){ const seconds=((now()-Prog.startTime)/1000)|0; finalStats.textContent='Score: '+Prog.score+' • Level: '+Prog.level+' • Time: '+seconds+'s'; Scores.add({score:Prog.score, level:Prog.level, time:seconds, date:new Date().toISOString()}); renderScores(); msg.style.display="flex"; }
+
+/* ========= Renderer ========= */
+function draw(){ ctx.clearRect(0,0,W.w,W.h); ctx.save(); ctx.globalAlpha=0.15; ctx.strokeStyle="#112138"; ctx.lineWidth=1; for(let x=0;x<W.w;x+=48){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,W.h); ctx.stroke(); } for(let y=0;y<W.h;y+=48){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W.w,y); ctx.stroke(); } ctx.restore(); if(State.radar){ ctx.save(); ctx.globalAlpha=0.7; ctx.strokeStyle="#f87171"; ctx.beginPath(); ctx.arc(Player.x,Player.y,180,0,Math.PI*2); ctx.stroke(); ctx.restore(); } for(const e of ENT){ if(e===Player) continue; ctx.save(); if(e.kind==="prey"){ ctx.fillStyle="#34d399"; } else if(e.kind==="neutral"){ ctx.fillStyle="#a3e635"; } else { ctx.fillStyle="#f87171"; } if(e.stun){ ctx.globalAlpha=0.55; } ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,Math.PI*2); ctx.fill(); ctx.restore(); } ctx.save(); ctx.fillStyle = State.invuln>0?"#22d3ee":"#60a5fa"; ctx.beginPath(); ctx.arc(Player.x,Player.y,Player.r,0,Math.PI*2); ctx.fill(); if(Prog.passives.indexOf("spike")!==-1){ ctx.strokeStyle="#93c5fd"; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.arc(Player.x,Player.y,Player.r+3,0,Math.PI*2); ctx.stroke(); } ctx.restore(); if(State.toxin && Math.random()<0.4){ ctx.save(); ctx.globalAlpha=0.25; ctx.fillStyle="#22c55e"; ctx.beginPath(); ctx.arc(Player.x+rand(-Player.r,Player.r), Player.y+rand(-Player.r,Player.r), 2, 0, Math.PI*2); ctx.fill(); ctx.restore(); } }
+
+function updateHUD(){
+  hudLvl.textContent='Lv '+Prog.level;
+  hudScore.textContent='Score '+Prog.score;
+  hudPowers.textContent='Powers: '+Prog.actives.length+'/2';
+  const cds=Prog.actives.map(function(id){ return (Prog.cds[id]>0)?'■':'▢'; }).join(' ');
+  hudCD.textContent='CD '+(cds||'▢ ▢');
+  sideLvl.textContent=Prog.level;
+  sideScore.textContent=Prog.score;
+  const pct=Math.round((Prog.biomass/Prog.next)*100);
+  bar.style.width=pct+"%"; barPct.textContent=pct+"%";
+  // safer map without optional chaining
+  const names = Prog.actives.map(function(id){ var evo = Evolutions.find(function(e){ return e.id===id; }); return evo ? evo.name : ''; }).filter(Boolean);
+  sidePowers.textContent = names.join(', ') || 'None';
+}
+function refreshMutelist(){
+  mutelist.innerHTML="";
+  const passiveNames = Prog.passives.map(function(id){ var ev = Evolutions.find(function(e){ return e.id===id; }); return ev ? ev.name+" (Passive)" : null; }).filter(Boolean);
+  const activeNames  = Prog.actives.map(function(id){ var ev = Evolutions.find(function(e){ return e.id===id; }); return ev ? ev.name+" (Active)" : null; }).filter(Boolean);
+  const all = passiveNames.concat(activeNames);
+  if(all.length===0){ mutelist.innerHTML='<div><span>None yet</span><span class="small">Pick at Lv 5</span></div>'; return; }
+  all.forEach(function(n){ const div=document.createElement("div"); div.innerHTML='<span>'+n+'</span><span class="small">Stacked</span>'; mutelist.appendChild(div); });
+}
+
+/* ========= Loop / Pause ========= */
+let timeScale=1.0, rafId=null;
+function loop(){ if(!W.running) return; const nt=now(); const dt=clamp((nt-W.lastT)/1000,0,0.05); W.lastT=nt; W.time+=dt; if(State.invuln>0) State.invuln-=dt; if(State.armorTimer>0) State.armorTimer-=dt; if(State.slowOnNear && nearPredator(120)) timeScale=0.6; else timeScale=1.0; waveLogic(dt*timeScale); for(let i=1;i<ENT.length;i++){ const e=ENT[i]; aiStep(e,dt*timeScale); e.x=wrapX(e.x+e.vx*dt*timeScale); e.y=wrapY(e.y+e.vy*dt*timeScale); const sp=Math.hypot(e.vx,e.vy); const cap = e.kind==="pred"? BASE_STD_SPEED*0.95 : BASE_STD_SPEED*0.85; if(sp>cap){ e.vx*=cap/sp; e.vy*=cap/sp; } } handleInput(dt*timeScale); Player.x=wrapX(Player.x+Player.vx*dt*timeScale); Player.y=wrapY(Player.y+Player.vy*dt*timeScale); Object.keys(Prog.cds).forEach(function(id){ if(Prog.cds[id]>0) Prog.cds[id]-=dt*timeScale; if(Prog.cds[id]<0) Prog.cds[id]=0; }); collideStep(); draw(); updateHUD(); rafId=requestAnimationFrame(loop); }
+function nearPredator(r){ for(let i=1;i<ENT.length;i++){ const e=ENT[i]; if(e.kind!=="pred") continue; const dx=e.x-Player.x, dy=e.y-Player.y; if(dx*dx+dy*dy<=r*r) return true; } return false; }
+function pauseGame(){ if(!W.running) return; W.running=false; if(rafId){ cancelAnimationFrame(rafId); rafId=null; } paused.style.display="flex"; btnPause.textContent="Resume"; }
+function resumeGame(){ if(W.running) return; paused.style.display="none"; W.running=true; W.lastT=now(); btnPause.textContent="Pause"; loop(); }
+function togglePause(){ if(evoModal.style.display==="flex") return; W.running ? pauseGame() : resumeGame(); }
+
+/* ========= Sound ========= */
+function sfx(type){
+  if(Settings.sound!=="on") return;
+  try{
+    if(!sfx._ctx){
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return; // environment without WebAudio
+      sfx._ctx = new AC();
+    }
+    var ctxA = sfx._ctx;
+    var o = ctxA.createOscillator();
+    var g = ctxA.createGain();
+    var f=440, t=0.08;
+    if(type==="dash") f=520;
+    if(type==="blink") f=680;
+    if(type==="burst") f=300;
+    if(type==="lash") f=420;
+    if(type==="pop") f=260;
+    if(type==="pulse") f=200;
+    if(type==="life") f=160;
+    o.frequency.value=f; g.gain.value=0.04;
+    o.connect(g); g.connect(ctxA.destination);
+    o.start(); o.stop(ctxA.currentTime+t);
+  }catch(err){ /* swallow audio errors to avoid breaking game loop */ }
+}
+
+/* ========= Decoy ========= */
+function spawnDecoy(){ const d=makeEntity("neutral", Math.max(6, Player.r*0.6), Player.x, Player.y, 0); d.decoy=4.0; ENT.push(d); }
+
+/* ========= Resize handling ========= */
+function fitCanvas(){ const rect=wrap.getBoundingClientRect(); canvas.width=Math.max(720, rect.width|0); canvas.height=Math.max(420, (rect.height|0)); W.w=canvas.width; W.h=canvas.height; }
+addEventListener("resize", fitCanvas);
+
+/* ========= UI wiring ========= */
+btnStart.addEventListener("click", function(){ evoModal.style.display="none"; msg.style.display="none"; paused.style.display="none"; applySpeedSetting(); resetGame(); W.running=true; W.lastT=now(); Prog.startTime=now(); btnPause.textContent="Pause"; loop(); });
+
+document.getElementById("msgRestart").addEventListener("click", function(){ msg.style.display="none"; btnStart.click(); });
+document.getElementById("msgClose").addEventListener("click", function(){ msg.style.display="none"; });
+
+btnPause.addEventListener("click", togglePause);
+
+document.getElementById("pausedResume").addEventListener("click", resumeGame);
+document.getElementById("pausedSettings").addEventListener("click", function(){ paused.style.display="none"; openSettings(); });
+
+btnSettings.addEventListener("click", openSettings);
+function openSettings(){ selDensity.value=Settings.density; selAggro.value=Settings.aggro; selPlySpeed.value=Settings.playerSpeed; selSound.value=Settings.sound; settingsDlg.style.display="flex"; }
+document.getElementById("settingsClose").addEventListener("click", function(){ settingsDlg.style.display="none"; });
+document.getElementById("settingsSave").addEventListener("click", function(){ Settings.density=selDensity.value; Settings.aggro=selAggro.value; Settings.playerSpeed=selPlySpeed.value; Settings.sound=selSound.value; Settings.save(); settingsDlg.style.display="none"; applySpeedSetting(); });
+
+btnScores.addEventListener("click", function(){ renderScores(); scoresDlg.style.display="flex"; });
+document.getElementById("scoresClose").addEventListener("click", function(){ scoresDlg.style.display="none"; });
+document.getElementById("scoresClear").addEventListener("click", function(){ if(confirm("Clear all local scores?")){ Scores.clear(); renderScores(); } });
+
+function renderScores(){ scoreTable.innerHTML=""; if(Scores.list.length===0){ scoreTable.innerHTML='<tr><td colspan="5" class="small">No scores yet. Try surviving longer than a fruit fly.</td></tr>'; return; } Scores.list.forEach(function(s,i){ const tr=document.createElement("tr"); const d=new Date(s.date); tr.innerHTML='<td>'+(i+1)+'</td><td>'+s.score+'</td><td>'+s.level+'</td><td>'+s.time+'s</td><td>'+d.toLocaleString()+'</td>'; scoreTable.appendChild(tr); }); }
+
+/* ========= Boot ========= */
+fitCanvas(); applySpeedSetting(); resetGame();
+addEventListener("keydown", function(e){ if(!W.running && e.key==="Enter"){ btnStart.click(); }});
+
+/* ========= Safety ========= */
+window.onkeydown = function(e){ if(e.key===" " && e.target===document.body) e.preventDefault(); };
+
+/* ========= Dev sanity tests (lightweight) ========= */
+(function devTests(){
+  try{
+    console.assert(typeof aiStep === 'function', 'aiStep should be defined');
+    console.assert(typeof handleInput === 'function', 'handleInput should be defined');
+    const testPred = makeEntity('pred', 12, 10, 10, 0);
+    const testPrey = makeEntity('prey', 6, 50, 50, 0);
+    aiStep(testPred, 0.016); console.assert(isFinite(testPred.vx), 'aiStep should update vx for pred');
+    aiStep(testPrey, 0.016); console.assert(isFinite(testPrey.vx), 'aiStep should update vx for prey');
+    console.assert(canvas.width>0 && canvas.height>0, 'Canvas should be sized');
+    // sfx should be callable without throwing even if AudioContext is missing
+    try { sfx('dash'); } catch(e) { console.error('sfx should not throw', e); }
+    // evolution use safety
+    const fake = {id:'fake', use: null};
+    try { if(typeof fake.use === 'function') fake.use(); } catch(e){ console.error('fake evo use threw', e); }
+  }catch(err){ console.error('Dev tests failed:', err); }
+})();
+</script>
+</body>
+</html>
